@@ -11,11 +11,11 @@ This package also includes examples on how to create visualizations from walking
 
 ## Installation
 
-To install a version of `walkingcalculatr`, a GitHub Personal Access Token is needed in order to install from CDCEnt:
+To install a version of `walkingcalculatr`:
 
 ```{r, eval = FALSE}
 # using the remotes R package
-remotes::install_github("https://github.com/cdcent/walkingcalculatr", auth_token = 'insert_PAT_here')
+remotes::install_github("https://github.com/cdcgov/walkingcalculatr")
 ```
 
 Several common R packages should be automatically installed by installing the package; however platform specific (MacOS, Windows, Linux) installation steps may be required to install additional dependencies outlined in [Installation.Rmd](./vignettes/Installation.Rmd). A version of Spark is only required if the data needs to be partitioned due to memory limitations. Currently `walkingcalculatr` functions have been tested for partitions < 200 million rows using a 64 Gb Linux machine. 
@@ -39,5 +39,3 @@ The rest of this documentation includes:
 - [Troubleshooting/Common Issues](./vignettes/Troubleshooting.Rmd): outlining possible fixes for previously observed common issues
 - [Understanding walkingcalculatr output](./vignettes/Output.Rmd): in-depth discussion on output metrics
 - [Next Steps](./vignettes/Next_Steps.Rmd): notes on potential enhancements to walking extraction (i.e., Python conversion) and additional walking metrics
-
-For any questions or comments, please contact [David Ederer](xhj2@cdc.gov).
