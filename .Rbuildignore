@@ -1,0 +1,11 @@
+^renv$
+^renv\.lock$
+^walkingcalculatr\.Rproj$
+^\.Rproj\.user$
+walking_code
+vignettes
+^data-raw$
+
+R/create_partitions.R
+Python
+^LICENSE\.md$

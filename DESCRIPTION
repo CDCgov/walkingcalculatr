@@ -1,0 +1,55 @@
+Package: walkingcalculatr
+Title: Walking Extraction for Location Based Services (LBS) Data
+Description: An R package for extracting walks and walk metrics from large amounts of Location Based Services (LBS) data.
+Version: 0.0.0.1
+Authors@R: c(
+    person("Ruth", "Hunter",  email = "email@email.com", role = "aut"),
+    person("Leandro", "Garcia", role = "aut"),
+    person("Thiago", "de Sa", role = "aut"),
+    person("Belen", "Zapata-Diomedi", role = "aut"),
+    person("Christopher", "Millett", role = "aut"),
+    person("Belen", "Zapata-Diomedi", role = "aut"),
+    person("James", "Woodcock", role = "aut"),
+    person("Alex Sandy", "Woodcock", role = "aut"),
+    person("Esteban", "Moro", email = "emoro@mit.edu", role = "aut"),
+    person("Geoffrey", "Whitfield", email = "xdh5@cdc.gov", role = "aut"),
+    person("David", "Ederer", email = "xhj2@cdc.gov", role = c("aut", "cre")),
+    person("Raymond", "King", email = "rnk8@cdc.gov", role = "aut"),
+    person("Parker", "Foe", email = "pfoe@mitre.org", role = "aut"),
+    person("Bradley", "Alderama", email = "balderama@mitre.org", role = "aut"),
+    person("Megan", "Ward", email = "mward@mitre.org", role = "ctb"),
+    person("Andrew", "Foote", email = "afoote@mitre.org", role = "ctb"),
+    person("Dan", "Chudnov", email = "dlchudnov@mitre.org", role = "ctb"),
+    person("Marc", "Hadley", email = "mhadley@mitre.org", role = "ctb")
+    )
+License: GPL (>= 3)
+Encoding: UTF-8
+Imports:
+  arrow,
+  data.table,
+  dplyr,
+  lubridate,
+  lutz,
+  nngeo,
+  osmdata,
+  purrr,
+  Rcpp,
+  rlang,
+  sf,
+  stringr,
+  tidyr,
+  tidycensus,
+  tigris,
+  zoo
+Suggests:
+  ggplot2,
+  ggrepel,
+  sparklyr
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.1
+Depends: 
+    R (>= 2.10)
+LazyData: true
+LazyDataCompression: bzip2
+LinkingTo: 
+    Rcpp
