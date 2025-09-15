@@ -15,7 +15,7 @@ DateTime==5.5
 debugpy==1.8.5
 decorator==5.1.1
 executing==2.0.1
-fiona==1.9.6
+fiona==1.10b2
 fonttools==4.53.1
 geopandas==0.13.2
 idna==3.7
