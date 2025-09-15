@@ -1,0 +1,5 @@
+## High Performance Computing (HPC) Environment
+
+MITRE (as of July 2024) has access to an HPC cluster for all employees used to intensive computing applications and sponsor projects. The MITRE HPC (Easley) has several CPUs and GPUs available and leverages a job scheduler (Slurm Workload Manager) for launching jobs around the clock. The Physical Activity Surveillance Team at MITRE leveraged the HPC to calculate walks and walks in walkable areas for a large number of and larger sized geographical areas (over 300 census tracts and 15 counties).
+
+[Slurm](https://slurm.schedmd.com/quickstart.html) is an open source, fault-tolerant, and highly scalable cluster management and job scheduling system for large and small Linux clusters. Two examples of Slurm scripts are provided in `run-stratify.sh` and `get-python-walks-array.sh` for reference. `get-python-walks-array.sh` provides an example of a Slurm job array which requests multiple instances (~300 jobs, 200 GB memory and 3 hour maximum allocation) to calculate walks in multiple geographical areas. The Slurm scripts are reference and should be adapted to the requested task and job scheduler available to the user.
