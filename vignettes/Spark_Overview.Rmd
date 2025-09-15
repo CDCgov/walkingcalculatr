@@ -1,0 +1,252 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+  title: "Data Partitioning"
+  date: '`r paste("First created on June 01, 2023. Updated on", Sys.Date())`'
+---
+
+```{r echo = FALSE}
+knitr::opts_knit$set(root.dir = dirname(dirname(rstudioapi::getSourceEditorContext()$path)))
+```
+
+Read in SparkR functions from **create_partitions.R**.
+```{r}
+library(dplyr)
+library(devtools)
+source('walkingcalculatr/R/create_partitions.R')
+```
+
+## Spark Overview
+
+**Apache Spark** is an open-source, distributed processing system used for big data workloads. **Sparklyr**[^1] is an R package that provides bindings to Spark’s distributed machine learning library.  Sparklyr is normally preferred over **SparkR**[^2] (Spark's wrapper library for R) as it includes dplyr compatibility however, for data partitioning which uses read/write operations SparkR has faster performance. 
+
+## Spark Installation
+
+SparkR is included with a version of Spark installed. A version of Spark can be installed manually via the [Apache Spark website](https://spark.apache.org/downloads.html) or using the `spark_install()` function from the sparklyr package.
+
+### Installing Spark from Sparklyr
+
+sparklyr can be installed from CRAN as follows. 
+```{r, eval = FALSE}
+install.packages('sparklyr', INSTALL_opts = '--no-lock', quiet = F)
+```
+
+sparklyr makes it easy to install spark using R. 
+A list of available versions can be printed.
+```{r}
+library(sparklyr)
+print(spark_available_versions())
+```
+
+Download a recent version of Spark using `spark_install()`.
+```{r, eval = FALSE}
+spark_install(version = "3.3.0")
+```
+
+### Java Installation
+
+SparkR runs on both Windows and UNIX-like systems (e.g. Linux, Mac OS), and it should run on any platform that runs a supported version of Java (version between 8 - 17). Java can be manually installed from this [link](https://www.oracle.com/java/technologies/downloads/#java8). 
+
+Once Java installed, the JAVA_HOME environment variable should be updated with the java installed path.
+
+For MacOS, this can be done via Terminal:
+```
+export JAVA_HOME="path/to/your/java/jdk"
+```
+
+For Windows, this can be done via Command Prompt:
+```
+setx JAVA_HOME "path/to/your/java/jdk" /M
+```
+
+A user can also set the JAVA_HOME variable on their R session prior to initialing a Spark session:
+```{r, eval = FALSE}
+Sys.setenv(JAVA_HOME = "path/to/your/java/jdk")
+```
+
+## SparkR Setup
+
+To find the directory a version of Spark is installed, create a Spark connection (aka Session) 
+using sparklyr and create a variable with the **spark_home** dir. If the Spark directory is known, this step is optional.
+```{r, warning= F}
+library(sparklyr)
+
+sc <- spark_connect(master = "local")
+spark_path = sc$spark_home
+spark_disconnect(sc)
+```
+
+Given a version of Spark installed, the SparkR library can be imported as follows. Replace **spark_path** with your Spark home directory and create a temporary directory to avoid memory issues
+```{r, echo = F, warning = F}
+# Read in SparkR package given spark home dir
+Sys.setenv(SPARK_HOME = spark_path)
+
+# Set spark local directories to avoid memory issues on /tmp
+Sys.setenv(R_SESSION_TMPDIR = './spark-tmp')
+library(SparkR, lib.loc = c(file.path(Sys.getenv("SPARK_HOME"), "R", "lib")))
+```
+
+A Spark session can be initialized with multiple configuration options such as 
+`spark.driver.memory` which allocates memory for the current workers. More information on available Spark configuration parameters can be found [here](https://spark.apache.org/docs/latest/sparkr.html#starting-up-sparksession).
+
+```{r, echo = F, warning = F}
+sc <- sparkR.session(master = "local[*]",
+                     appName = "LBS_R",
+                     sparkConfig = c(spark.driver.memory = "16g",
+                                     spark.local.dir = '/home/balderama/Rscratch/spark-tmp',
+                                     spark.sql.session.timeZone = "UTC",
+                                     spark.sql.broadcastTimeout = "3600"))
+
+sq <- sparkRSQL.init(sc)
+```
+
+## SparkR Usage
+
+
+To read in data as a spark data frame, the `read.df()` function can be used.
+A helper function `read_csvs()` which casts all csvs within a directory (**\csvPath**) to a spark data frame was created for your convenience. See the example below:
+```{r,  eval = F}
+# Helper function to read in raw csvs and concatenate
+read_csvs <- function(file_lst) {
+  
+  # Read in first file
+  df <- read.df(file_lst[[1]], "csv",
+                header = "true",
+                inferSchema = "true",
+                na.strings = "NA")
+  
+  # Concatenate with remaining
+  for (i in seq_along(file_lst)) {
+    
+    if (i > 1) {
+      temp <- read.df(file_lst[[i]],
+                      "csv",
+                      header = "true",
+                      inferSchema = "true",
+                      na.strings = "NA")
+      
+      df <- rbind(df, temp)
+    }
+  }
+  return(df)
+}
+
+# Read in data
+df_raw <- read_csvs(csvPath)
+```
+
+For our example, we will read in synthetic LBS data from our package as follows:
+```{r,  eval = F}
+devtools::load_all(".")
+data("synthetic_ness_data")
+```
+
+Then cast the data to a spark data frame.
+```{r,  eval = F}
+df_raw <- as.DataFrame(synthetic_ness_data)
+```
+
+The data schema can be printed out for a given spark data frame.
+```{r,  eval = F}
+# Show schema
+printSchema(df_raw)
+```
+
+Basic operations such as displaying and obtaining counts can also be performed.
+```{r,  eval = F}
+# Show counts
+SparkR::count(df_raw)
+```
+
+```{r,  eval = F}
+# Display data
+head(df_raw)
+```
+
+In addition, data wrangling using a syntax similar to dplyr can be used. 
+```{r,  eval = F}
+# Lower case all character vectors to ensure de-duping
+df_raw$id <- SparkR::lower(df_raw$id)
+
+# Down-select and rename some rows
+df_clean <- df_raw %>% SparkR::select('id', 
+               'unix_timestamp',
+               'latitude', 
+               'longitude') %>% 
+                SparkR::withColumnRenamed("id", "userId") %>% 
+                SparkR::withColumnRenamed("unix_timestamp", "time") %>% 
+                SparkR::withColumnRenamed("latitude", "lat") %>% 
+                SparkR::withColumnRenamed("longitude", "lon") 
+
+# Remove duplicates by id and time
+df_clean <- df_clean %>% SparkR::dropDuplicates(c('userId', 'time'))
+
+# Show updated counts
+SparkR::count(df_clean)
+```
+
+SQL queries can be run on your spark data frame as well. 
+SQL queries execute faster then native SparkR functions, so is the preferred method for basic calculations.
+```{r,  eval = F}
+# Cast data-frame as temp view
+createOrReplaceTempView(df_clean, "df_clean")
+
+# Get number of records
+numDevices <- SparkR::collect(SparkR::sql("SELECT COUNT(*) as TOT_ROWS from df_clean"))
+
+# Get number of unique devices
+numUnique <- SparkR::collect(SparkR::sql("SELECT COUNT(DISTINCT(userId)) from df_clean"))
+
+# Get average, max and min num of pings by device
+numPings <- SparkR::collect(SparkR::sql("SELECT MEAN(NumPings), MAX(NumPings), MIN(NumPings) FROM (SELECT userId, COUNT(*) as NumPings from df_clean GROUP BY userId)"))
+
+# Get counts by bbox
+numLats <- SparkR::collect(SparkR::sql("SELECT COUNT(*) FROM from df_clean WHERE lat BETWEEN 80 AND 81"))
+
+# Print out summary table
+summary_stats <- cbind(numDevices, numUnique, numPings)
+head(summary_stats)
+```
+
+Data can be written to local memory using `write.parquet()` or `write.csv()` functions.
+```{r,  eval = F}
+# Save as parquet with snappy compression (to save space)
+write.parquet(df_clean, "../data/spark_ness_parquet", 
+              mode = "overwrite", 
+              compression = "snappy")
+```
+
+Confirm data written to local memory can be read in.
+```{r, eval = F}
+df <- SparkR::read.df(sc, 
+                      path = "../data/spark_ness_parquet",
+                      source = 'parquet', 
+                      schema = NULL)
+
+printSchema(df)
+head(df)
+```
+
+A Spark session should be disconnected once spark is no longer needed as follows. 
+```{r, eval = F}
+# Disconnect Spark session
+sparkR.stop()
+```
+
+## Partitioning Data
+
+Partitioning is only necessary if the current size of the data cannot be read in memory using conventional R packages (data.table, dplyr). Currently the walkingcalculatr functions have been verified to work on LBS data  (< 200 million rows) given a  64 GB Linux machine. As read/write operations have slower performance, the smallest number of N partitions is recommended. A helper script **create_partitions.R** is included to help with partitioning the data.
+
+The `create_partition_from_parquet()` function ensures N partitions from a given LBS directory are created
+with device stratified partitions. Device stratification is required for walkingcalculatr functions as 
+all records within a given device must be located within the same file. 
+
+```{r,  eval = F}
+# Create N partitions and save to output dir
+create_partition_from_parquet(sc, 
+                              sq,
+                              "../data/spark_ness_parquet",
+                              "../data/spark_ness_partitions",
+                              N = 10)
+```
