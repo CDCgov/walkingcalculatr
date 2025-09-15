@@ -1,0 +1,468 @@
+---
+title: "Walk Prevalence and Sidewalk Density"
+date: '`r paste("First created on June 19, 2023. Updated on", Sys.Date())`'
+output: 
+  html_document:
+    df_print: kable
+---
+
+```{r echo = F}
+knitr::opts_knit$set(root.dir = dirname(dirname(rstudioapi::getSourceEditorContext()$path)))
+```
+
+***
+To replicate the steps in this document, you will need to install and load the following libraries:
+
+```{r eval = T, warning = F, message=F}
+library(data.table)
+library(walkingcalculatr)
+
+# Packages necessary for visualization
+library(ggplot2) # used for map visualization
+library(sf) # used to get centroid of census tract to place census tract labels
+library(ggrepel) # used to prevent map labels from overlapping each other
+library(dplyr) # used to chain functions and outline Scenario 2 tracts
+```
+
+Using the resulting data.table `walks_in_walkable` found in [Quickstart](./vignettes/Quickstart.Rmd) that mapped walks extracted from LBS data to walkable areas, we can calculate walk prevalence and sidewalk density to gain further insight on walking patterns and mobility in a given geographical area. 
+
+If the `walks_in_walkable` table has not been calculated, the pre-installed data set `san_francisco_walks` can be used to test the functionality of walk prevalence and sidewalk density. The `san_francisco_walks` data set contains walks extracted from `synthetic_san_francisco_data` and mapped to walkable areas throughout San Francisco's census tracts. For the purposes of this section, we will be using `san_francisco_walks`.
+
+```{r message=FALSE, eval = T, results='hide'}
+data("san_francisco_walks")
+head(san_francisco_walks)
+```
+
+```{r echo = F, message=F}
+library(kableExtra)
+head(san_francisco_walks) %>%
+  kable(format = "html", col.names = colnames(san_francisco_walks)) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
+```
+## Generating Walk Prevalence
+
+We can use walk prevalence to determine the frequency of walking trips within a given geographical area, and compare values between counties or census tracts for a better understanding of population movement. Walk prevalence is defined as the number of walking trips per capita by either census tract or county. We use the following equation to calculate walk prevalence:
+
+$$
+WalkPrevalence_{geographicArea} = \frac{TripCount_{geographicArea}}{PopulationEstimate_{geographicArea}}
+$$
+
+$TripCount$ uses the total count of unique walking trips from the `walks_in_walkable` table in `Quickstart.Rmd` or `Usage.Rmd` to ensure that walking trip trajectories are within walkable areas in the census tract or county. If using census tracts for the $geographicArea$, walking trips that pass through multiple census tracts count for each crossed tract.
+</br>
+
+$PopulationEstimate$ is derived from the census tract-level population estimates provided by the [U.S Census American Community Survey (ACS)](https://www.census.gov/programs-surveys/acs/about.html). At the time of documentation, the most recent population estimate available is 2022.
+
+</br>
+
+The `walkingcalculatr` package includes two functions to create the population estimate dataset, `get_acs_population_cache()` and `get_acs_population_api()`. If you have a valid [Census API key](https://api.census.gov/data/key_signup.html), you can use `get_acs_population_api()` to extract the population estimates from the Census API. For the examples below, we will use estimates from __San Francisco County, CA__. 
+```{r eval = F}
+# name of the county
+county <- "San Francisco"
+# 2-character state abbreviation
+state <- "CA"
+# year that the original san_francisco_walks came from
+year <- 2022
+# valid Census API key
+census_key <- "your_key_here"
+
+tract_population <- get_acs_population_api(api_key = census_key,
+                                           county_name = county,
+                                           state = state, 
+                                           year = year
+                                           )
+
+```
+
+If you do not have a valid [Census API key](https://api.census.gov/data/key_signup.html), you can use `get_acs_population_cache()` to use a cached version of the 2022 population estimates for your county.
+```{r eval = T, message = F}
+# name of the county
+county <- "San Francisco"
+# 2-character state abbreviation
+state <- "CA"
+# year that the original san_francisco_walks came from
+year <- 2022
+
+# get cached tract population from 2022 for San Francisco County
+tract_population <- get_acs_population_cache(county_name = county,
+                                             state = state, 
+                                             year = year)
+
+head(tract_population)
+```
+```{r echo = F, message=F}
+library(kableExtra)
+head(tract_population) %>%
+  kable(format = "html", col.names = colnames(tract_population)) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
+```
+
+</br>
+
+### County-Level Walk Prevalence
+We can use the extracted walks data (`walks_in_walkable`) or the `san_francisco_walks` package data as well as the 2022 ACS census tract population estimates from __San Francisco County, CA__ to find the total number of walking trips per capita by county using `county_walk_prevalence()`.
+
+```{r county walk prevalence, warning = FALSE, message=FALSE}
+# Add in necessary inputs to get county walk prevalence
+# name of the county
+county <- "San Francisco"
+# 2-character state abbreviation
+state <- "CA"
+# year that the original san_francisco_walks came from
+year <- 2022
+
+# get cached tract population from 2022 for San Francisco County
+tract_population <- get_acs_population_cache(county_name = county,
+                                             state = state, 
+                                             year = year)
+
+# Compute walk prevalence at the county level
+county_walk_prevalence(walks_in_walkable_df = san_francisco_walks, 
+                       acs_tract_population_df = tract_population)
+```
+
+Since the American Community Survey data hasn't been released for 2022 at the time of documentation, walk prevalence defaults to using 2021 ACS estimates instead. The output columns include:
+
+Variable | Variable Description
+--- | -------------
+count_walkable | Total count of unique walking trips in walkable areas.
+  pop_estimate | U.S. Census county population estimate for the input year.
+     walk_prev | Ratio of total walking trips to the county's total estimated population.
+     
+### Census Tract-Level Walk Prevalence
+
+We can use the same input variables from `county_walk_prevalence()` to find the total number of walking trips per capita for every census tract in __San Francisco County, CA__ using the `tract_walk_prevalence()` function.
+
+```{r tract walk prevalence, warning = FALSE, message = FALSE}
+# Add in necessary inputs to get tract walk prevalence
+# name of the county
+county <- "San Francisco"
+# 2-character state abbreviation
+state <- "CA"
+# year that the original san_francisco_walks came from
+year <- 2022
+
+# get cached tract population from 2022 for San Francisco County
+tract_population <- get_acs_population_cache(county_name = county,
+                                             state = state, 
+                                             year = year)
+
+# Compute walk prevalence at the census tract level
+sf_walk_prevalence <- tract_walk_prevalence(walks_in_walkable_df = san_francisco_walks, 
+                                            acs_tract_population_df = tract_population)
+
+# Investigate resulting dataset
+head(sf_walk_prevalence)
+```
+```{r echo = F, message=F}
+library(kableExtra)
+head(sf_walk_prevalence) %>%
+  kable(format = "html", col.names = colnames(sf_walk_prevalence)) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
+```
+
+The output columns include:
+
+Variable | Variable Description 
+--- | -------------
+GEOID | U.S. Census unique identifier from the `tigris` package. Read more [here](https://www.census.gov/programs-surveys/geography/guidance/geo-identifiers.html)
+NAMELSAD | Concatenated variable length geographic area name and legal/statistical area description (e.g., Census Tract 1234).
+geometry | Stored spatial geometry of the census tract for later visualization.
+count_walkable | Total count of unique walking trips in walkable areas.
+  pop_estimate | U.S. Census county population estimate for the input year.
+     walk_prev | Ratio of total walking trips to the county's total estimated population.
+     
+### Walk Prevalence Summary Statistics
+
+Summary statistics such as mean, median, standard deviation, and total can be output for the tract-level walk prevalence data frame (`sf_walk_prevalence`) using `walk_prevalence_summary()`.
+```{r}
+walk_prevalence_summary(tract_walk_prevalence_df = sf_walk_prevalence)
+```
+
+### Visualizing Census Tract-Level Walk Prevalence
+
+We can use `ggplot2` to better visualize the walk prevalence for each census tract within a county. The below code snippet outlines a heat map of all census tracts in San Francisco County based on the walk prevalence within each census tract.
+
+Before we visualize San Francisco County's walk prevalence, we want to do some data preparation first. Because population estimates and walking frequency can vary within census tracts, there are three scenarios "outside of normal" that need to be accounted for when visualizing tracts, and decision rules on how to prepare the data to mitigate them.
+
+Census Tract Scenario | Resolution | Reasoning
+------------ | ---------- |----------------
+1. Census tract population is 0 with 0 walking trips | Census tract automatically removed in `tract_walk_prevalence()` | Walk prevalence cannot be calculated.
+2. Census tract population is 0 with > 0 walking trips | Census tract population estimate and walking trip counts included in table without walk prevalence | Walk prevalence cannot reliably be calculated with a population of 0 and would artificially increase the average walk prevalence, so it is up to the user to decide whether they want to include these scenarios.
+3. Census tract population is > 0 with 0 walking trips | Keep census tract in table and visualization | Although the walk prevalence would be 0, it is still important to highlight tracts that have population estimates but no recorded walking trips.
+
+```{r warning=FALSE}
+# Preparing data for visualization
+sf_viz <- sf_walk_prevalence %>%
+  # calculate centroid of each tract polygon and get coordinates
+  cbind(., st_coordinates(st_centroid(st_as_sf(.)))) %>% 
+  # normalize walk prevalence by taking log()
+  mutate(walk_prev = ifelse(walk_prev != 0, log(walk_prev), walk_prev), 
+         # Remove `Census Tract` for ease of visualization
+         NAMELSAD = gsub("Census Tract ", "", NAMELSAD)) %>%
+  filter(!(NAMELSAD %in% c("9804.01", "9902", "9901"))) # exclude tracts in Faralon islands
+  # exclude_lst <- exclude_tract(c("9804.01", "9902", "9901"))
+
+```
+
+After preparing the data to account for any problematic tract scenarios, you can use the following snippet to walk through how to replicate the visualization below for __San Francisco County, CA__ .
+```{r viz_wp, fig.asp = 0.8, fig.align='center', warning = F}
+
+# Initialize the map visualization using walk_prev and GEOID to display valid census tracts within the county
+viz_wp <- ggplot(sf_viz$geometry, label = sf_viz[["GEOID"]])
+  
+viz_wp +
+  
+  # fill census tracts with gradient based on normalized walk prevalence for each tract
+  geom_sf(mapping = aes(fill = sf_viz$walk_prev),
+          color = "white",
+          lwd = 0.25) +
+  # use accessibility color gradient scale 'viridis' to display walk prevalence, and simplify legend scale to categories
+  scale_fill_continuous(type = "viridis",
+                        breaks = c(max(sf_viz$walk_prev, na.rm = T) - 0.5,
+                                   median(sf_viz$walk_prev, na.rm = T),
+                                   min(sf_viz$walk_prev, na.rm = T) + 0.5),
+                        labels = c("High Walk Prevalence",
+                                   "Median Walk Prevalence",
+                                   "Low Walk Prevalence")) +
+  # outline in red any tracts in Scenario 2: census tract population is 0 with > 0 walking trips
+  geom_sf(data = subset(sf_viz, is.na(walk_prev) & count_walkable > 0)$geometry,
+          color = "red",
+          linewidth = 0.5,
+          fill = "white") +
+  # add axis and title labels based on county name inputted in walk prevalence
+  labs(
+    x = "Longitude", 
+    y = "Latitude",
+    fill='Walk Prevalence Scale',
+    title = paste(year,county,"County Walk Prevalence", sep = " ")
+  ) + 
+  # configure visualization options for readability. See `ggplot2::theme` for available options
+  theme(
+    plot.title = element_text(size=18),
+    axis.title = element_text(size = 12),
+    legend.position = "right",
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  # display tract name labels for the 5 tracts with the highest walk prevalence
+  ggrepel::geom_label_repel(
+    data = sf_viz %>%
+      data.frame() %>%
+      slice_max(n = 5, order_by = walk_prev),
+    aes(label = NAMELSAD, x = X, y = Y),
+    colour = "black",
+    parse = TRUE,
+    segment.colour = "darkgreen",
+    segment.size = 1.2,
+    nudge_x = 0.05,
+    size=3,
+    arrow = arrow(length = unit(0.01, "npc"))) +
+  # display tract name labels for the 5 tracts with the lowest walk prevalence
+  ggrepel::geom_label_repel(
+    data = sf_viz %>%
+      data.frame() %>%
+      slice_min(n = 5, order_by = walk_prev),
+    aes(label = NAMELSAD, x = X, y = Y),
+    colour = "black",
+    parse = TRUE,
+    segment.colour = "magenta",
+    segment.size = 1.2,
+    nudge_y = 0.01,
+    nudge_x = 0.04,
+    size=3,
+    arrow = arrow(length = unit(0.01, "npc")))
+
+```
+
+***
+
+## Generating Sidewalk Density
+
+When mapping walking trips, we calculate sidewalk density to better understand pedestrian accessibility of the built environment within a given county or census tract. It then follows that areas with high sidewalk density are more walkable than areas with low sidewalk density, and we would expect to see more physical movement in areas with high sidewalk density. 
+</br>
+We first use OpenStreetMaps to extract all available sidewalk and pedestrian-accessible highway features at either a county or census-tract level. A specific list of extract features can be found in the table below. More information on these features can be found on the OSM website linked in the table headers:
+
+[Included Highway Features](https://wiki.openstreetmap.org/wiki/Key:highway) | [Included Sidewalk Features](https://wiki.openstreetmap.org/wiki/Key:sidewalk)
+--- | ---
+Trunk | Pedestrian
+Primary Link | Footway
+Living street | Path
+Secondary | Residential
+Secondary Link | Track
+Tertiary |
+Tertiary Link |
+
+We then implement the following equation to calculate sidewalk density:
+
+$$
+SidewalkDensity_{geographicArea} = \frac{TotalSidewalkLength_{geographicArea}}{TotalPedestrianAccessibleHighwayLength_{geographicArea}}
+$$
+Where sidewalk density is the total sidewalk length in a given geographic area over the total pedestrian-accessible "non-sidewalk" length.
+
+### County-Level Sidewalk Density
+
+We use `county_sidewalk_density()` to extract the sidewalk density for __San Francisco County, CA__ in 2022.
+```{r county sidewalk density}
+# run sidewalk density for the whole county
+county_density <- county_sidewalk_density(county_name = "San Francisco", 
+                                          state = "CA", 
+                                          year = 2022)
+# investigate county_density output
+county_density
+```
+The output columns include:
+
+Variable | Variable Description 
+--- | -------------
+county_name | Total count of unique walking trips in walkable areas.
+sidewalk_length_km | Total length of sidewalk throughout the selected county in kilometers
+ped_accessible_highway_length_km | Total length of sidewalk throughout the selected county in kilometers
+  sidewalk_density | Density of sidewalk and walkable roadway features in a county represented as a ratio
+
+
+### Census Tract-Level Sidewalk Density
+
+We can also find the sidewalk density for every census tract in __San Francisco County, CA__ using the `tract_sidewalk_density()` function. Due to the number of tracts in certain counties, there are a few extra steps that need to be done before tract-level sidewalk density can be calculated.
+<br>
+
+First, we need to extract all the sidewalk density features from OpenStreetMaps and map it to each of the census tracts in San Francisco using `get_density_feat()`. The sidewalk density features include walkable features like footpaths, sidewalks, and tracks, but also types of roads that typically have sidewalks attached to them.
+```{r density feature list}
+# Get all of the census tracts for San Francisco County
+county_tracts <- get_county_tracts(county_name = "San Francisco",
+                                   state = "CA", 
+                                   year = 2022
+                                   )
+
+# Extract the sidewalk density features from OpenStreetMaps using county_tracts as boundaries
+density_feat_lst <- get_density_feat(county_tracts = county_tracts,
+                                     year = 2022
+                                     )
+```
+
+
+_OPTIONAL_ Sidewalk density feature extraction can take a long time, so you can use `save_density_feat()` to save the resulting `density_feat_lst` created using `get_density_feat()` into the desired location. Then you can use `load_density_feat()` to load the `density_feat_lst` before calculating tract-level sidewalk density.
+```{r eval = FALSE}
+# Save density_feat_lst into the desired directory
+save_density_feat(density_feat_lst, use_save_directory = "insert_directory_here")
+
+# Before using tract_sidewalk_density, load density_feat_lst
+density_feat_lst <- load_density_feat(save_file_path = "/data/density_file_path.RData")
+
+```
+
+Finally, use `county_tracts` and `density_feat_lst` to calculate `tract_sidewalk_density()`
+```{r tract sidewalk density}
+# Run sidewalk density across all San Francisco County census tracts
+tract_density <- tract_sidewalk_density(county_tracts = county_tracts,
+                                        sidewalk_density_feature_lst = density_feat_lst
+                                        )
+
+# investigate tract_density output
+head(tract_density)
+```
+
+The output columns include:
+</br>
+
+Variable | Variable Description 
+--- | -------------
+GEOID | U.S. Census unique identifier from the `tigris` package. Read more [here](https://www.census.gov/programs-surveys/geography/guidance/geo-identifiers.html)
+NAMELSAD | Concatenated variable length geographic area name and legal/statistical area description (e.g., Census Tract 1234).
+geometry | Stored spatial geometry of the census tract for later visualization.
+sidewalk_length_km | Total length of sidewalk throughout the selected county in kilometers.
+ped_accessible_highway_length_km | Total length of sidewalk throughout the selected county in kilometers.
+  sidewalk_density | Density of sidewalk and walkable roadway features in a county represented as a ratio.
+  
+### Visualizing Census Tract-Level Sidewalk Density
+
+Like walk prevalence, we can use `ggplot2` to better visualize the sidewalk density for each census tract within a county. The below code snippet outlines a heat map of all census tracts in San Francisco County based on the sidewalk density within each census tract.
+
+Before we visualize San Francisco County's sidewalk density, we want to do some data preparation first to make the visualization process easier. In this example, San Francisco County includes the Farallon Islands as a census tract (Census Tract 9804.01). The Farallon Islands is a designated wildlife refuge, and therefore cannot be accessed by the general public except with explicit permission. Because of this designation, these islands will be excluded from our visualization. Read more [here](https://www.fws.gov/refuge/farallon-islands).
+  
+```{r sd_viz_prep, warning=FALSE}
+# Preparing data for visualization
+sf_viz_sd <- tract_density %>%
+  # calculate centroid of each tract polygon and get coordinates
+  cbind(., st_coordinates(st_centroid(st_as_sf(.)))) %>%
+  # remove the Farallon Islands tracts as no humans are allowed there
+  filter(NAMELSAD != "Census Tract 9804.01") %>%
+  # normalize sidewalk density by taking log()
+  mutate(sidewalk_density = ifelse(sidewalk_density != 0, log(sidewalk_density), sidewalk_density), 
+         # Remove `Census Tract` for ease of visualization
+         NAMELSAD = gsub("Census Tract ", "", NAMELSAD)) 
+
+```
+
+Once the data preparation is complete, we use the resulting `sf_viz_sd` to visualize sidewalk density in a similar way as walk prevalence.
+```{r viz_sd, fig.asp = 0.8, fig.align='center'}
+
+# Initialize the map visualization using sidewalk density and GEOID to display valid census tracts within the county
+viz_sd <- ggplot(sf_viz_sd$geometry, label = sf_viz_sd[["GEOID"]])
+  
+viz_sd +
+  # fill census tracts with gradient based on normalized sidewalk density for each tract
+  geom_sf(mapping = aes(fill = sf_viz_sd$sidewalk_density),
+          color = "white",
+          lwd = 0.25) +
+  # use accessibility color gradient scale 'viridis' to display sidewalk density, and simplify legend scale to categories
+  scale_fill_continuous(type = "viridis",
+                        breaks = c(max(sf_viz_sd$sidewalk_density, na.rm = T) - 0.5,
+                                   median(sf_viz_sd$sidewalk_density, na.rm = T),
+                                   min(sf_viz_sd$sidewalk_density, na.rm = T) + 0.5),
+                        labels = c("High Sidewalk Density",
+                                   "Median Sidewalk Density",
+                                   "Low Sidewalk Density")) +
+  # outline in red any tracts that do not have sidewalk density
+  geom_sf(data = subset(sf_viz_sd, is.na(sidewalk_density))$geometry,
+          color = "red",
+          linewidth = 0.5,
+          fill = "white") +
+  # add axis and title labels based on county name inputted in sidewalk density
+  labs(
+    x = "Longitude", 
+    y = "Latitude",
+    fill='Sidewalk Density Scale',
+    title = paste(year,county,"County Sidewalk Density", sep = " ")
+  ) + 
+  # configure visualization options for readability. See `ggplot2::theme` for available options
+  theme(
+    plot.title = element_text(size=18),
+    axis.title = element_text(size = 12),
+    legend.position = "right",
+    panel.grid.major = element_blank(), 
+    panel.grid.minor = element_blank(),
+    strip.background = element_blank(),
+    axis.text.x = element_text(angle = 45, vjust = 1, hjust=1)) +
+  # display tract name labels for the 5 tracts with the highest sidewalk density
+  ggrepel::geom_label_repel(
+    data = sf_viz_sd %>%
+      data.frame() %>%
+      slice_max(n = 5, order_by = sidewalk_density),
+    aes(label = NAMELSAD, x = X, y = Y),
+    colour = "black",
+    parse = TRUE,
+    segment.colour = "green",
+    segment.size = 1.2,
+    nudge_x = -0.05,
+    size=3,
+    arrow = arrow(length = unit(0.01, "npc"))) +
+  # display tract name labels for the 5 tracts with the lowest sidewalk density
+  ggrepel::geom_label_repel(
+    data = sf_viz_sd %>%
+      data.frame() %>%
+      slice_min(n = 5, order_by = sidewalk_density),
+    aes(label = NAMELSAD, x = X, y = Y),
+    colour = "black",
+    parse = TRUE,
+    segment.colour = "magenta",
+    segment.size = 1.2,
+    nudge_y = 0.01,
+    nudge_x = 0.04,
+    size=3,
+    arrow = arrow(length = unit(0.01, "npc")))
+
+```

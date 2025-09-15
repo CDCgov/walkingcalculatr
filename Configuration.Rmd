@@ -1,0 +1,199 @@
+---
+title: "Configuration"
+date: '`r paste("First created on April 01, 2023. Updated on", Sys.Date())`'
+output:
+  html_document: 
+    df_print: kable
+---
+
+```{r, echo = FALSE}
+knitr::opts_knit$set(root.dir = dirname(dirname(rstudioapi::getSourceEditorContext()$path)))
+options(scipen=999)
+```
+
+The`walkingcalculatr` package installed using [Installation](Installation.Rmd) can be loaded as a package. To replicate the steps in this document, you will need to install and load the following libraries:
+
+```{r eval = T, warning = F, message=F}
+library(walkingcalculatr)
+library(dplyr)
+library(data.table)
+```
+
+***
+
+
+## Basic walk extraction from provided data
+
+For convenience, `walkingcalculatr` comes with a synthetic location based services (LBS) dataset called **synthetic_ness_data**. As a reminder, a user can load in the provided synthetic data and extract walks as follows:
+```{r results='hide', message = F}
+# read in synthetic_ness_data
+data("synthetic_ness_data")
+
+# Extract walks from LBS data for the first partition. Column names are from your LBS dataset 
+extracted_walks <- get_walks(
+  raw_lbs_dt = synthetic_ness_data, 
+  user = "id", # ID column name in LBS data
+  unix_time = "unix_timestamp", # UNIX timestamp column name in LBS data
+  latitude = 'latitude', # latitude of ping column name in LBS data
+  longitude = 'longitude', # longitude of ping column name in LBS data
+  accuracy = "horizontal_accuracy", # accuracy column name in LBS data
+  ) 
+
+# investigate the resulting data.table
+head(extracted_walks)
+```
+
+```{r echo = F, message=F}
+library(kableExtra)
+head(extracted_walks) %>%
+  kable(format = "html", col.names = colnames(extracted_walks)) %>%
+  kable_styling() %>%
+  scroll_box(width = "100%")
+
+```
+
+If you are able to run these steps and see a similar result, you have the `walkingcalculatr` package installed correctly.
+
+***
+
+### Basic walk extraction from multiple raw data files
+If you have a directory containing your raw data files in "parquet", "arrow", "ipc", "feather", "csv", "csv.gz", "tsv", "text", or "json" formats, you can read them all in at once using [arrow::open_dataset()](https://arrow.apache.org/docs/r/reference/open_dataset.html) then use [dplyr::collect()](https://arrow.apache.org/docs/2.0/r/articles/dataset.html) in order to gather the data into a single object.
+Once the data has been read and combined, run `get_walks()` to get our extracted walks.
+
+```{r message = F, eval = F}
+library(arrow)
+library(dplyr)
+
+# read in all files from a directory that are in the csv or csv.gz format
+raw_files <- arrow::open_dataset(sources = "/directory/of/files/", format = "csv") # for .csv.gz files, you can still use "csv" as the format
+
+raw_lbs <- raw_files %>%
+  collect()
+
+data.table::setDT(raw_lbs) # set resulting file to data.table format
+
+extracted_walks <- get_walks(raw_lbs,
+                             user = "id", # ID column name in LBS data
+                             unix_time = "unix_timestamp", # UNIX timestamp column name in LBS data
+                             latitude = 'latitude', # latitude of ping column name in LBS data
+                             longitude = 'longitude', # longitude of ping column name in LBS data
+                             accuracy = "horizontal_accuracy", # accuracy column name in LBS data
+                             
+                             # below are optional variables. Users can change values for the below
+                             # variables if needed, but not necessary as the defaults are already
+                             # integrated in the get_walks() function. See ?get_walks() for more details
+                             
+                             homeDist = 100, # Threshold for utilitarian calculation, default is 100m
+                             am_peak_start = 6, # Start of AM peak hours, function default is 6:00
+                             am_peak_end = 10,  # End of AM peak hours, function default is 10:00
+                             pm_peak_start = 15, # Start of PM peak hours, function default is 15:00
+                             pm_peak_end = 19 # End of PM peak hours, function default is 19:00
+
+                         )
+
+head(extracted_walks)
+```
+
+
+### _OPTIONAL_ Customizing your OSM features
+
+After extracting walks as described in *Basic walk extraction* , we can limit walks to user defined walkable areas by using the OpenStreetMap Point-of-Interest (POI) data. More information on available OSM features can be found at this [link](https://wiki.openstreetmap.org/wiki/Map_features). 
+</br>
+
+Our default "walkable" areas are defined as any feature that a person can walk on like footpaths, sidewalks, parks, etc. based on how Moro originally defined walkable areas in his research. `walkingcalculatr` has several functions that allows the user to extract these areas from OSM and cache it into the directory of their choice or a temporary directory. To do so, we first need to extract the desired areas from OSM based on the `county_name`, `state`, and `year` of the original LBS dataset, then group the areas into their census tracts.
+</br>
+
+Even though it is recommended to use the `default_walkable_area()` to easily extract the default OSM walkable features, we show how to define your own list of OSM features using `get_osm_feat()` by following the steps below. A list of available OSM features can be found [here](https://wiki.openstreetmap.org/wiki/Map_features).
+
+```{r eval = FALSE}
+# define the county, state, and year of your LBS dataset
+county_name <- "Ness"
+state <- "KS"
+year <- 2021
+
+# Extract all census tracts and their geometry based on county name, state, and year
+county_tracts <- get_county_tracts(county_name, state, year)
+
+# Use get_osm_feat to customize the OSM extraction for walking paths.
+walk_feats <- get_osm_feat(county_tracts,
+                              osm_key = "highway",
+                              osm_feat_val = c("residential", "living_street","cycleway",
+                                               "pedestrian", "footway","track","path"),
+                              keep_osm_geometry = "osm_lines") # always define keep_osm_geometry to reduce eventual size of feature list
+
+# Use get_osm_feat to customize the OSM extraction for walking paths
+leisure_feats <- get_osm_feat(county_tracts, osm_key = "leisure",
+                      osm_feat_val = c("park","playground",
+                                       "golf_course","nature_reserve"),
+                      keep_osm_geometry = "osm_polygons") # always define keep_osm_geometry to reduce eventual size of feature list
+
+# Features must be added to a named list
+custom_feat_lst <- list(walk_feats = walk_feats,
+                leisure_feats = leisure_feats)
+
+# Features are then grouped by census tract GEOID and saved as tract-level shapefiles in the directory
+tract_area_lst <- walkable_areas(county_tracts, custom_feat_lst)
+```
+
+***
+
+## Finding walks in walkable areas
+
+Walks within walkable areas can be generated using `find_walkable()` and OSM walkable areas created above by combining the `extracted_walks` dataframe found using `get_walks()` in step 1, the `county_tracts` dataframe, and the buffered OSM walkable areas `tract_area_lst` found in step 2. 
+</br>
+
+The option `walkable_area_location` will take a `list()` object with a named list of walkable areas by tract using `walkable_areas()` or a directory path object that contains cached walkable areas by tract that were saved using `save_walkable_areas()`.
+
+```{r eval = FALSE}
+walks_in_walkable <- find_walkable(extracted_walks,
+                                   county_tracts,
+                                   walkable_area_location = tract_area_lst)
+```
+
+## _OPTIONAL_ Basic configuration options
+
+The utilitarian vs. recreational split has a variable **homeDist** which is the distance for utilitarian vs recreation walk split (default 100 m). A user can modify that threshold for a data path using `get_walks()` or update a pre-existing walk table using `createUtilSplit()`.
+
+```{r message=FALSE}
+# Extract walks from LBS data for the first partition. Column names are from your LBS dataset 
+util_walks_200 <- get_walks(
+  raw_lbs_dt = synthetic_ness_data, 
+  user = "id", # ID column name in LBS data
+  unix_time = "unix_timestamp", # UNIX timestamp column name in LBS data
+  latitude = 'latitude', # latitude of ping column name in LBS data
+  longitude = 'longitude', # longitude of ping column name in LBS data
+  accuracy = "horizontal_accuracy", # accuracy column name in LBS data
+  homeDist = 200 # utilitarian walk split in meters
+                         ) 
+
+# return a table of the count of walking trips with the new threshold
+util_walk_summary <- util_walks_200 %>% 
+  group_by(IsUtilWalk) %>% 
+  summarise(count_walk_trips = n_distinct(userId, walkNum))
+
+print(util_walk_summary)
+```
+
+The AM-PM peak hours can be modified within `get_walks()`(defaults are 6 to 10 AM and
+3 PM to 6 PM). Hours outside of those hours will be categorized as `off_peak()`.
+```{r eval = T, message=F}
+# Extract walks with given peak hours
+peak_walks <- get_walks(synthetic_ness_data, 
+                         user = "id", # ID column name in LBS data
+                         unix_time = "unix_timestamp", # UNIX timestamp column name in LBS data
+                         latitude = 'latitude', # latitude of ping column name in LBS data
+                         longitude = 'longitude', # longitude of ping column name in LBS data
+                         accuracy = "horizontal_accuracy", # accuracy column name in LBS data
+                         am_peak_start = 6,
+                         am_peak_end = 8,
+                         pm_peak_start = 17,
+                         pm_peak_end = 19
+                         ) 
+
+# return a table of the count of walking trips with the new peaks threshold
+peak_walk_summary <- peak_walks %>% 
+  group_by(walk_peak_cat) %>% 
+    summarise(count_walk_trips = n_distinct(userId, walkNum))
+
+print(peak_walk_summary)
+```
