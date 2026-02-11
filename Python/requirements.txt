@@ -40,7 +40,7 @@ parso==0.8.4
 path==17.0.0
 pexpect==4.9.0
 pickleshare==0.7.5
-pillow==10.4.0
+pillow==12.1.1
 platformdirs==4.2.2
 polars==1.4.1
 prompt-toolkit==3.0.47
