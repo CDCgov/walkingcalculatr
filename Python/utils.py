@@ -205,7 +205,7 @@ def CleanData(df):
     @df: Polars dataframe containing userId, time, lat and lon information
     '''
     print(df.columns)
-    
+
     # Rename columns and sort data
     if ('id' in df.columns) and \
         ('latitude' in df.columns) and \
@@ -213,15 +213,37 @@ def CleanData(df):
         ('unix_timestamp' in df.columns) and \
         ('horizontal_accuracy' in df.columns):
 
-        dfclean = df.select(pl.col("id").str.to_lowercase().cast(pl.Categorical).alias('userId'),
-                        pl.col('latitude').cast(pl.Float64).alias('lat'), 
-                        pl.col('longitude').cast(pl.Float64).alias('lon'),
-                        pl.col('unix_timestamp').alias('time'),
-                        pl.col('horizontal_accuracy').cast(pl.Float64).alias('accuracy')
-                        ).sort('userId', 'time', 'lat', 'lon',  'accuracy')
-        
-        dfclean = dfclean.with_columns(time = (pl.col('time').cast(pl.Float64)/1000).cast(pl.Int32)) # Update time datatype and divide by 1000 if in miliseconds
-        dfclean = dfclean.unique(subset = ['userId', 'time'], maintain_order = True) # Drop duplicates
+        dfclean = df.select(
+            pl.col("id").str.to_lowercase().cast(pl.Categorical).alias('userId'),
+            pl.col('latitude').cast(pl.Float64).alias('lat'),
+            pl.col('longitude').cast(pl.Float64).alias('lon'),
+            pl.col('unix_timestamp').alias('time'),
+            pl.col('horizontal_accuracy').cast(pl.Float64).alias('accuracy')
+        ).sort('userId', 'time', 'lat', 'lon', 'accuracy')
+
+        # 10-digit Unix timestamps are already in seconds.
+        # 13-digit Unix timestamps are in milliseconds and need
+        # to be divided by 1000.
+        time_int = pl.col('time').cast(pl.Int64)
+
+        dfclean = dfclean.with_columns(
+            pl.when(
+                time_int.cast(pl.String).str.len_chars() == 13
+            )
+            .then(
+                time_int // 1000
+            )
+            .otherwise(
+                time_int
+            )
+            .alias('time')
+        )
+
+        # Drop duplicate observations for the same user and timestamp
+        dfclean = dfclean.unique(
+            subset=['userId', 'time'],
+            maintain_order=True
+        )
 
     elif ('ID' in df.columns) and \
         ('TIMESTAMP' in df.columns) and \
@@ -231,38 +253,102 @@ def CleanData(df):
 
         # Rename columns to match
         # UPDATE: TIMESTAMP instead of UNIX_TIMESTAMP
-        dfclean = df.select(pl.col("ID").str.to_lowercase().cast(pl.Categorical).alias('userId'),
-                        pl.col('LATITUDE').cast(pl.Float64).alias('lat'), 
-                        pl.col('LONGITUDE').cast(pl.Float64).alias('lon'),
-                        pl.col('TIMESTAMP'),
-                        pl.col('HORIZONTAL_ACCURACY').cast(pl.Float64).alias('accuracy')
-                        )
-        
+        dfclean = df.select(
+            pl.col("ID").str.to_lowercase().cast(pl.Categorical).alias('userId'),
+            pl.col('LATITUDE').cast(pl.Float64).alias('lat'),
+            pl.col('LONGITUDE').cast(pl.Float64).alias('lon'),
+            pl.col('TIMESTAMP'),
+            pl.col('HORIZONTAL_ACCURACY').cast(pl.Float64).alias('accuracy')
+        )
+
         # Convert UTC to Unix
-        dfclean = dfclean.with_columns((pl.col('TIMESTAMP').map_elements(lambda x: dt.strptime(x + "+00:00","%Y-%m-%d %H:%M:%S%z").timestamp())).alias('time'))
-        dfclean = dfclean.sort('userId', 'time', 'lat', 'lon',  'accuracy')
-        
-        dfclean = dfclean.with_columns(time = pl.col('time').cast(pl.Int32)) # Cast to int type
-        dfclean = dfclean.unique(subset = ['userId', 'time'], maintain_order = True) # Drop duplicates
+        dfclean = dfclean.with_columns(
+            (
+                pl.col('TIMESTAMP')
+                .map_elements(
+                    lambda x: dt.strptime(
+                        x + "+00:00",
+                        "%Y-%m-%d %H:%M:%S%z"
+                    ).timestamp()
+                )
+            ).alias('time')
+        )
+
+        dfclean = dfclean.sort(
+            'userId',
+            'time',
+            'lat',
+            'lon',
+            'accuracy'
+        )
+
+        dfclean = dfclean.with_columns(
+            time=pl.col('time').cast(pl.Int32)
+        )
+
+        dfclean = dfclean.unique(
+            subset=['userId', 'time'],
+            maintain_order=True
+        )
 
     else:
 
         # Rename columns and sort data
-        dfclean = df.select(pl.col("userId").str.to_lowercase().cast(pl.Categorical),
-                            pl.col('lat').cast(pl.Float64),
-                            pl.col('lon').cast(pl.Float64),
-                            pl.col('time'),
-                            pl.col('accuracy').cast(pl.Float64)
-                            ).sort('userId', 'time', 'lat', 'lon',  'accuracy')
+        dfclean = df.select(
+            pl.col("userId").str.to_lowercase().cast(pl.Categorical),
+            pl.col('lat').cast(pl.Float64),
+            pl.col('lon').cast(pl.Float64),
+            pl.col('time'),
+            pl.col('accuracy').cast(pl.Float64)
+        ).sort(
+            'userId',
+            'time',
+            'lat',
+            'lon',
+            'accuracy'
+        )
 
-        dfclean = dfclean.with_columns(time = (pl.col('time').cast(pl.Float64)/1000).cast(pl.Int32)) # Update time datatype and divide by 1000 if in miliseconds
-        dfclean = dfclean.unique(subset = ['userId', 'time'], maintain_order = True) # Drop duplicates
+        # 10-digit Unix timestamps are already in seconds.
+        # 13-digit Unix timestamps are in milliseconds and need
+        # to be divided by 1000.
+        time_int = pl.col('time').cast(pl.Int64)
+
+        dfclean = dfclean.with_columns(
+            pl.when(
+                time_int.cast(pl.String).str.len_chars() == 13
+            )
+            .then(
+                time_int // 1000
+            )
+            .otherwise(
+                time_int
+            )
+            .alias('time')
+        )
+
+        # Drop duplicate observations for the same user and timestamp
+        dfclean = dfclean.unique(
+            subset=['userId', 'time'],
+            maintain_order=True
+        )
 
     # Remove inaccurate points
-    dfclean = dfclean.filter(pl.col('accuracy') < 200) 
-    dfclean = dfclean.filter((pl.col('lat') > 1) & (pl.col('lon') < -1)) 
+    dfclean = dfclean.filter(
+        pl.col('accuracy') < 200
+    )
 
-    return dfclean.select('userId', 'time', 'lat', 'lon',  'accuracy')
+    dfclean = dfclean.filter(
+        (pl.col('lat') > 1) &
+        (pl.col('lon') < -1)
+    )
+
+    return dfclean.select(
+        'userId',
+        'time',
+        'lat',
+        'lon',
+        'accuracy'
+    )
 
 def FindWalks(df, minSpeed: float = 0.5, maxSpeed: float= 5.0):
     '''
